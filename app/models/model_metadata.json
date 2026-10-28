@@ -303,5 +303,29 @@
             "min": 0.0,
             "max": 103.91
         }
-    }
+    },
+    "explanation_base_value": 0.5551099466641713,
+    "global_importance": {
+        "stem-color": 0.06281445948944855,
+        "gill-attachment": 0.0578861968021334,
+        "stem-width": 0.05787848141124307,
+        "gill-color": 0.04877234725490334,
+        "cap-surface": 0.04675195872452491,
+        "gill-spacing": 0.03818338418855292,
+        "stem-surface": 0.03742354817747009,
+        "stem-height": 0.035557859981331034,
+        "cap-color": 0.0347927842024907,
+        "cap-shape": 0.03381075426905357,
+        "stem-root": 0.029099400379240924,
+        "cap-diameter": 0.029006001393719397,
+        "ring-type": 0.024324505786255696,
+        "does-bruise-or-bleed": 0.019229034710984784,
+        "habitat": 0.0165150418590679,
+        "has-ring": 0.016311483770435852,
+        "spore-print-color": 0.016044955629644232,
+        "season": 0.009539344039278136,
+        "veil-color": 0.009189234101872872,
+        "veil-type": 0.009154471895091665
+    },
+    "global_importance_method": "Media de |contribución de camino| del Random Forest agrupada por variable original (300 especímenes de test)"
 }

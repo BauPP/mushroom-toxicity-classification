@@ -10,9 +10,9 @@ Funcionalidades:
  2.  Predicción por lotes desde archivo CSV.
  3.  Probabilidad de toxicidad en tiempo real (predict_proba).
  4.  Umbral de riesgo cero τ* configurable con efecto inmediato en el dictamen.
- 5.  Explicabilidad local SHAP de la predicción individual.
- 6.  Explicabilidad local LIME de la predicción individual.
- 7.  Explicabilidad global SHAP (importancia morfológica).
+ 5.  Desglose local de la probabilidad por variable (contribuciones nativas del Random Forest).
+ 6.  Simulador "¿qué pasaría si...?" para cualquier variable del espécimen.
+ 7.  Importancia global precalculada (sin cálculo al arrancar la app).
  8.  Dashboard de métricas del modelo desplegado en el conjunto de test.
  9.  Comparativa de los 4 modelos entrenados.
  10. Matriz de confusión del modelo desplegado.
@@ -39,19 +39,8 @@ MODELS_DIR = ROOT / "app" / "models"
 DATA_PATH = ROOT / "data" / "raw" / "secondary_data.csv"
 FORMULAS_PATH = ROOT / "docs" / "formulas_matematicas_modelos.md"
 
-# Contorno de compatibilidad (igual que en el notebook 03): en entornos con
-# política de Control de Aplicaciones de Windows, el DLL
-# sklearn.datasets._svmlight_format_fast puede estar bloqueado. SHAP no lo usa.
-try:
-    import sklearn.datasets  # noqa: F401
-except ImportError:
-    import types as _types
-
-    _stub = _types.ModuleType("sklearn.datasets._svmlight_format_fast")
-    _stub._dump_svmlight_file = None
-    _stub._load_svmlight_file = None
-    sys.modules["sklearn.datasets._svmlight_format_fast"] = _stub
-    import sklearn.datasets  # noqa: F401,E402
+sys.path.insert(0, str(ROOT))
+from src.utils import aggregate_by_original, tree_path_contributions, what_if_scan  # noqa: E402
 
 st.set_page_config(
     page_title="Clasificación de Toxicidad de Hongos",
@@ -139,62 +128,64 @@ def cargar_dataset() -> pd.DataFrame:
     return pd.read_csv(DATA_PATH, sep=";")
 
 
-@st.cache_resource(show_spinner="Preparando explicadores (SHAP y LIME)...")
-def construir_explicadores(_preprocessor, _model, _df):
-    """Instancia los explicadores locales y calcula la importancia global una sola vez."""
-    import lime.lime_tabular
-
-    feature_names = [n.replace("num__", "").replace("cat__", "")
-                     for n in _preprocessor.get_feature_names_out()]
-
-    fondo = _preprocessor.transform(_df.head(1000).drop(columns=["class"], errors="ignore"))
-    lime_explainer = lime.lime_tabular.LimeTabularExplainer(
-        training_data=fondo,
-        feature_names=feature_names,
-        class_names=["Comestible", "Venenoso"],
-        mode="classification",
-        random_state=42,
-    )
-
-    shap_explainer = None
-    shap_global = None
-    try:
-        import shap
-
-        shap_explainer = shap.TreeExplainer(_model)
-        muestra = _preprocessor.transform(_df.sample(300, random_state=42).drop(columns=["class"], errors="ignore"))
-        valores = shap_explainer.shap_values(muestra)
-        if isinstance(valores, list):
-            valores = valores[1]
-        elif isinstance(valores, np.ndarray) and valores.ndim == 3:
-            valores = valores[:, :, 1]
-        shap_global = np.abs(valores).mean(axis=0)
-    except Exception as exc:  # noqa: BLE001 - degradación controlada a importancias nativas
-        st.caption(f"SHAP no disponible ({exc}); se usarán las importancias nativas del modelo.")
-
-    return lime_explainer, shap_explainer, shap_global, feature_names
-
-
-def valores_shap_instancia(shap_explainer, x_cod):
-    if shap_explainer is None:
+def importancia_global(meta: dict, model, preprocessor, columnas: list) -> pd.Series:
+    """Importancia por variable original: la precalculada en el notebook 03 o, si falta,
+    las importancias nativas del modelo agrupadas por variable."""
+    if meta.get("global_importance"):
+        return pd.Series(meta["global_importance"]).sort_values(ascending=False)
+    importancias = getattr(model, "feature_importances_", None)
+    if importancias is None:
         return None
-    valores = shap_explainer.shap_values(x_cod)
-    if isinstance(valores, list):
-        return valores[1][0]
-    if isinstance(valores, np.ndarray) and valores.ndim == 3:
-        return valores[0, :, 1]
-    return np.asarray(valores).reshape(-1)
+    agrupadas = aggregate_by_original(importancias, list(preprocessor.get_feature_names_out()), columnas)
+    return agrupadas.iloc[0].sort_values(ascending=False)
 
 
-def barra_contribuciones(nombres, valores, titulo, top=10):
-    """Barras horizontales: rojo empuja hacia venenoso, verde hacia comestible."""
-    orden = np.argsort(np.abs(valores))[::-1][:top][::-1]
-    fig, ax = plt.subplots(figsize=(8, 0.55 * len(orden) + 1.4))
-    colores = ["#c62828" if v >= 0 else "#2e7d32" for v in valores[orden]]
-    ax.barh([nombres[i] for i in orden], valores[orden], color=colores)
+def barra_contribuciones(contribuciones: pd.Series, titulo: str, top: int = 10):
+    """Barras horizontales: rojo empuja hacia venenoso, verde hacia comestible.
+    Las variables fuera del top se agrupan en una sola barra."""
+    orden = contribuciones.abs().sort_values(ascending=False).index
+    visibles = contribuciones[orden[:top]].copy()
+    if len(orden) > top:
+        visibles[f"otras {len(orden) - top} variables"] = contribuciones[orden[top:]].sum()
+    visibles = visibles[::-1]
+    fig, ax = plt.subplots(figsize=(8, 0.42 * len(visibles) + 1.2))
+    colores = ["#c62828" if v >= 0 else "#2e7d32" for v in visibles.values]
+    barras = ax.barh(visibles.index, visibles.values * 100, color=colores)
+    ax.bar_label(barras, labels=[f"{v * 100:+.1f}" for v in visibles.values], padding=3, fontsize=9)
     ax.axvline(0, color="#555555", lw=0.8)
+    limite = max(abs(visibles.values).max() * 100 * 1.25, 1)
+    ax.set_xlim(-limite, limite)
     ax.set_title(titulo, fontsize=11, fontweight="bold")
-    ax.set_xlabel("Contribución a la clase venenosa")
+    ax.set_xlabel("Puntos porcentuales de P(venenoso)")
+    plt.tight_layout()
+    return fig
+
+
+def fig_que_pasaria_si(escaneo: pd.DataFrame, columna: str, valor_actual, tau: float, numerica: bool):
+    """Probabilidad de toxicidad para cada valor posible de una variable."""
+    fig, ax = plt.subplots(figsize=(8.5, 3.6))
+    if numerica:
+        ax.plot(escaneo["valor"], escaneo["probabilidad"], color="#1565c0", lw=2)
+        ax.axvline(valor_actual, color="#555555", lw=1, linestyle=":", label=f"valor actual ({valor_actual:.2f})")
+        ax.set_xlabel(ETIQUETAS_NUMERICAS.get(columna, columna))
+    else:
+        mapa = ETIQUETAS_CATEGORICAS.get(columna, {})
+        etiquetas = [
+            "sin\ndato" if pd.isna(v) else f"{v}\n{mapa[v].split('(')[-1].rstrip(')')}" if v in mapa else v
+            for v in escaneo["valor"]
+        ]
+        colores = ["#c62828" if p >= tau else "#2e7d32" for p in escaneo["probabilidad"]]
+        bordes = ["#000000" if (pd.isna(v) and pd.isna(valor_actual)) or v == valor_actual else "none"
+                  for v in escaneo["valor"]]
+        ax.bar(etiquetas, escaneo["probabilidad"], color=colores, edgecolor=bordes, linewidth=2)
+        ax.tick_params(axis="x", labelsize=7.5)
+        ax.set_xlabel(f"{columna} (borde negro = valor actual)")
+    ax.axhline(tau, color="#000000", lw=1.2, linestyle="--", label=f"umbral τ* = {tau:.2f}")
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("P(venenoso)")
+    ax.set_title(f"¿Qué pasaría si cambia {columna}?", fontsize=11, fontweight="bold")
+    ax.legend(loc="lower right", fontsize=8)
+    ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
     return fig
 
@@ -240,9 +231,8 @@ if not DATA_PATH.exists():
     st.error("No se encontró data/raw/secondary_data.csv. Clona el repositorio completo.")
     st.stop()
 DF = cargar_dataset()
-LIME_EXPLAINER, SHAP_EXPLAINER, SHAP_GLOBAL, FEATURE_NAMES = construir_explicadores(
-    PREPROCESSOR, MODEL, DF
-)
+FEATURE_NAMES = list(PREPROCESSOR.get_feature_names_out())
+MODELO_DE_ARBOLES = hasattr(MODEL, "estimators_") and hasattr(MODEL.estimators_[0], "tree_")
 
 # ------------------------------------------------------------------ barra lateral
 st.sidebar.title("🍄 Clasificador Micológico")
@@ -340,7 +330,7 @@ if PAGINA == "🎯 Predicción individual":
             st.success("✅ Espécimen clasificado como comestible bajo la garantía de riesgo cero.")
 
         with st.expander("Ver características ingresadas"):
-            st.dataframe(pd.DataFrame([fila]).T.rename(columns={0: "valor"}), width="stretch")
+            st.dataframe(pd.DataFrame([fila]).T.rename(columns={0: "valor"}).astype(str), width="stretch")
 
 # ================================================================== 2. PREDICCIÓN POR LOTES
 if PAGINA == "📦 Predicción por lotes":
@@ -431,70 +421,83 @@ elif PAGINA == "📊 Rendimiento del modelo":
 
 # ================================================================== 4. EXPLICABILIDAD
 elif PAGINA == "🔍 Explicabilidad (XAI)":
-    st.subheader("Explicabilidad: SHAP y LIME")
+    st.subheader("Explicabilidad: ¿por qué el modelo decidió esto?")
     ultima = st.session_state.get("ultima_prediccion")
     if ultima is None:
         espécimen = DF[TODAS_LAS_COLS].iloc[0].to_dict()
         st.caption("No hay predicción reciente: se explica el espécimen de ejemplo (primera fila del dataset).")
     else:
         espécimen = ultima["fila"]
-        st.caption(
-            f"Explicando tu última predicción — P(venenoso) = {ultima['proba']:.2%}."
-        )
+        st.caption("Explicando tu última predicción de la página «Predicción individual».")
 
     entrada = pd.DataFrame([espécimen])[TODAS_LAS_COLS]
-    x_cod = PREPROCESSOR.transform(entrada)
+    proba = float(PIPELINE.predict_proba(entrada)[0, 1])
+    venenoso = proba >= TAU
 
-    tab_shap, tab_lime, tab_global = st.tabs(["SHAP local", "LIME local", "SHAP global"])
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Dictamen", "⚠️ VENENOSO" if venenoso else "🍽️ COMESTIBLE")
+    c2.metric("P(venenoso)", f"{proba:.2%}")
+    c3.metric("Umbral τ*", f"{TAU:.2f}")
 
-    with tab_shap:
-        if SHAP_EXPLAINER is None:
-            st.warning("SHAP no está disponible en este entorno; usa la pestaña LIME o la importancia global.")
-        else:
-            valores = valores_shap_instancia(SHAP_EXPLAINER, x_cod)
-            st.pyplot(barra_contribuciones(
-                FEATURE_NAMES, valores,
-                "SHAP — contribución de cada rasgo a la decisión (instancia actual)",
-            ))
-            st.caption("Valores SHAP de TreeExplainer sobre las 128 características codificadas.")
+    # ---------------------------------------------------------- desglose local
+    st.markdown("#### 1. Desglose de la probabilidad por variable")
+    if MODELO_DE_ARBOLES:
+        base, contrib = tree_path_contributions(MODEL, PREPROCESSOR.transform(entrada))
+        por_variable = aggregate_by_original(contrib, FEATURE_NAMES, TODAS_LAS_COLS).iloc[0]
+        st.caption(
+            f"Punto de partida **{base:.1%}** (proporción de venenosos con la que arrancan los árboles) "
+            f"+ aporte de cada variable = **{base + por_variable.sum():.1%}**. "
+            "Rojo empuja hacia venenoso; verde, hacia comestible."
+        )
+        st.pyplot(barra_contribuciones(por_variable, "Aporte de cada variable a P(venenoso)"))
+        with st.expander("Ver el detalle por característica codificada (One-Hot)"):
+            detalle = pd.DataFrame({"característica": FEATURE_NAMES, "aporte": contrib[0]})
+            detalle = detalle[detalle["aporte"] != 0].sort_values("aporte", key=np.abs, ascending=False)
+            st.dataframe(detalle.style.format({"aporte": "{:+.4f}"}), width="stretch", hide_index=True)
+    else:
+        st.info(
+            f"El desglose nativo solo aplica a ensambles de árboles; el modelo desplegado es "
+            f"{META['model_name']}. Usa el simulador de abajo para analizar la decisión."
+        )
 
-    with tab_lime:
-        with st.spinner("Entrenando el modelo subrogado local (LIME)..."):
-            explicacion = LIME_EXPLAINER.explain_instance(
-                x_cod[0], MODEL.predict_proba, num_features=8, num_samples=2000, labels=(1,),
-            )
-        pares = explicacion.as_list(label=1)
-        nombres = [p[0] for p in pares][::-1]
-        pesos = [p[1] for p in pares][::-1]
-        fig, ax = plt.subplots(figsize=(8, 0.5 * len(pares) + 1.4))
-        ax.barh(nombres, pesos, color=["#c62828" if w >= 0 else "#2e7d32" for w in pesos])
-        ax.axvline(0, color="#555555", lw=0.8)
-        ax.set_title("LIME — peso local de las reglas (instancia actual)", fontsize=11, fontweight="bold")
-        ax.set_xlabel("Contribución a la clase venenosa")
+    # ---------------------------------------------------------- simulador qué pasaría si
+    st.markdown("#### 2. ¿Qué pasaría si…?")
+    st.caption("Cambia una variable del espécimen a todos sus valores posibles y observa la probabilidad.")
+    columna = st.selectbox(
+        "Variable a simular", TODAS_LAS_COLS,
+        index=TODAS_LAS_COLS.index(por_variable.abs().idxmax()) if MODELO_DE_ARBOLES else 0,
+    )
+    numerica = columna in NUM_COLS
+    if numerica:
+        rango = META["numeric_ranges"][columna]
+        valores = np.linspace(rango["min"], rango["max"], 60).tolist()
+    else:
+        valores = META["categorical_values"][columna] + [np.nan]
+    escaneo = what_if_scan(PIPELINE, espécimen, columna, valores)
+    st.pyplot(fig_que_pasaria_si(escaneo, columna, espécimen[columna], TAU, numerica))
+    cambian = escaneo[(escaneo["probabilidad"] >= TAU) != venenoso]
+    if cambian.empty:
+        st.success(f"Ningún valor de `{columna}` cambia el dictamen por sí solo.")
+    else:
+        st.warning(
+            f"{len(cambian)} de {len(escaneo)} valores de `{columna}` cambiarían el dictamen a "
+            f"**{'comestible' if venenoso else 'venenoso'}**."
+        )
+
+    # ---------------------------------------------------------- importancia global
+    st.markdown("#### 3. Importancia global del modelo")
+    importancia = importancia_global(META, MODEL, PREPROCESSOR, TODAS_LAS_COLS)
+    if importancia is None:
+        st.warning("Este modelo no expone importancias globales.")
+    else:
+        top = importancia.head(12)[::-1]
+        fig, ax = plt.subplots(figsize=(8, 4.6))
+        ax.barh(top.index, top.values * 100, color="#1565c0")
+        ax.set_title("Variables que más pesan en las decisiones del modelo", fontsize=11, fontweight="bold")
+        ax.set_xlabel("Aporte medio absoluto (puntos porcentuales de P(venenoso))")
         plt.tight_layout()
         st.pyplot(fig)
-        st.caption("LIME entrena un modelo lineal subrogado alrededor de la instancia.")
-
-    with tab_global:
-        if SHAP_GLOBAL is not None:
-            orden = np.argsort(SHAP_GLOBAL)[::-1][:12][::-1]
-            fig, ax = plt.subplots(figsize=(8, 4.8))
-            ax.barh([FEATURE_NAMES[i] for i in orden], SHAP_GLOBAL[orden], color="#1565c0")
-            ax.set_title("SHAP global — impacto medio absoluto (muestra de 300)", fontsize=11, fontweight="bold")
-            ax.set_xlabel("|valor SHAP| medio")
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            importancias = getattr(MODEL, "feature_importances_", None)
-            if importancias is None:
-                st.warning("Este modelo no expone importancias globales.")
-            else:
-                orden = np.argsort(importancias)[::-1][:12][::-1]
-                fig, ax = plt.subplots(figsize=(8, 4.8))
-                ax.barh([FEATURE_NAMES[i] for i in orden], importancias[orden], color="#1565c0")
-                ax.set_title("Importancia global del modelo (feature_importances_)", fontsize=11, fontweight="bold")
-                plt.tight_layout()
-                st.pyplot(fig)
+        st.caption(META.get("global_importance_method", "Importancias nativas del modelo (feature_importances_)."))
 
 # ================================================================== 5. EXPLORACIÓN DEL DATASET
 elif PAGINA == "🍄 Exploración del dataset":
@@ -551,9 +554,9 @@ elif PAGINA == "📖 Ficha técnica y fórmulas":
                     "Predicción por lotes desde archivo CSV con validación de columnas.",
                     "Probabilidad de toxicidad en tiempo real (predict_proba del pipeline).",
                     "Umbral de riesgo cero τ* aplicado al dictamen y explorable con un deslizador.",
-                    "Explicabilidad local SHAP de la predicción individual.",
-                    "Explicabilidad local LIME (modelo subrogado lineal).",
-                    "Explicabilidad global SHAP (importancia morfológica del ensamble).",
+                    "Desglose local de la probabilidad por variable (contribuciones nativas del Random Forest).",
+                    "Simulador «¿qué pasaría si…?» para cualquier variable del espécimen.",
+                    "Importancia global precalculada (sin cálculo al arrancar la app).",
                     "Dashboard de métricas del modelo desplegado en el conjunto de test.",
                     "Comparativa de los 4 modelos entrenados (LR, Random Forest, XGBoost, MLP).",
                     "Matriz de confusión del modelo desplegado.",

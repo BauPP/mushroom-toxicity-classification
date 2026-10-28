@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.sparse import csr_matrix
 from sklearn.metrics import (
     classification_report, 
     confusion_matrix, 
@@ -177,3 +178,105 @@ def plot_threshold_tuning_curve(
         save_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
+
+
+def tree_path_contributions(
+    forest,
+    X,
+    positive_class: int = 1
+) -> Tuple[float, np.ndarray]:
+    """
+    Descompone la probabilidad de un ensamble de árboles (Random Forest) en
+    un valor base más la contribución de cada característica codificada
+    (método de contribuciones de camino / Saabas):
+
+        P(Y=1 | x) = base + sum_j contribucion_j(x)
+
+    En cada árbol, al pasar de un nodo padre a un hijo la probabilidad de la
+    clase positiva cambia; ese cambio se atribuye a la variable con la que el
+    padre dividió los datos. El resultado se promedia sobre todos los árboles.
+    Solo usa numpy/scipy y la estructura interna de los árboles de sklearn.
+
+    Retorna (base, contribuciones) con contribuciones de forma (n_muestras, n_features).
+    """
+    X = np.asarray(X, dtype=np.float32)
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    n_features = X.shape[1]
+    col_positiva = list(forest.classes_).index(positive_class)
+
+    base = 0.0
+    contribuciones = np.zeros((X.shape[0], n_features))
+    for arbol in forest.estimators_:
+        tree = arbol.tree_
+        proporciones = tree.value[:, 0, :]
+        proporciones = proporciones / proporciones.sum(axis=1, keepdims=True)
+        p_positiva = proporciones[:, col_positiva]
+
+        # Padre de cada nodo (la raíz queda en -1)
+        padre = np.full(tree.node_count, -1)
+        for hijos in (tree.children_left, tree.children_right):
+            tiene_hijo = hijos >= 0
+            padre[hijos[tiene_hijo]] = np.nonzero(tiene_hijo)[0]
+
+        # Matriz nodo -> característica con el cambio de probabilidad al entrar al nodo
+        nodos = np.nonzero(padre >= 0)[0]
+        delta = csr_matrix(
+            (p_positiva[nodos] - p_positiva[padre[nodos]], (nodos, tree.feature[padre[nodos]])),
+            shape=(tree.node_count, n_features)
+        )
+        contribuciones += (arbol.decision_path(X) @ delta).toarray()
+        base += p_positiva[0]
+
+    n_arboles = len(forest.estimators_)
+    return base / n_arboles, contribuciones / n_arboles
+
+
+def map_encoded_to_original(
+    encoded_names: List[str],
+    original_columns: List[str]
+) -> List[str]:
+    """
+    Asocia cada característica codificada por el ColumnTransformer
+    (p. ej. 'cat__cap-shape_x' o 'num__cap-diameter') con su variable original.
+    """
+    originales = []
+    for nombre in encoded_names:
+        limpio = nombre.split("__", 1)[-1]
+        coincidencias = [c for c in original_columns if limpio == c or limpio.startswith(c + "_")]
+        originales.append(max(coincidencias, key=len) if coincidencias else limpio)
+    return originales
+
+
+def aggregate_by_original(
+    values: np.ndarray,
+    encoded_names: List[str],
+    original_columns: List[str]
+) -> pd.DataFrame:
+    """
+    Suma las columnas de `values` (n_muestras x n_features codificadas) que
+    pertenecen a la misma variable original (las 128 columnas One-Hot vuelven
+    a las 20 variables morfológicas). Retorna un DataFrame n_muestras x 20.
+    """
+    values = np.atleast_2d(values)
+    originales = map_encoded_to_original(encoded_names, original_columns)
+    return pd.DataFrame(values, columns=originales).T.groupby(level=0).sum().T[original_columns]
+
+
+def what_if_scan(
+    pipeline,
+    sample: Dict[str, Any],
+    column: str,
+    values: List[Any],
+    positive_class: int = 1
+) -> pd.DataFrame:
+    """
+    Simulador '¿qué pasaría si...?': reemplaza la variable `column` del
+    espécimen por cada valor de `values` y calcula P(venenoso) con una sola
+    llamada a predict_proba. Retorna un DataFrame [valor, probabilidad].
+    """
+    filas = pd.DataFrame([sample] * len(values))
+    filas[column] = values
+    col_positiva = list(pipeline.classes_).index(positive_class)
+    probabilidades = pipeline.predict_proba(filas)[:, col_positiva]
+    return pd.DataFrame({"valor": values, "probabilidad": probabilidades})

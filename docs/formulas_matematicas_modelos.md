@@ -190,3 +190,17 @@ Los gráficos siguientes son generados por `notebooks/03_model_training.ipynb` s
 **Explicabilidad global (SHAP)** — las variables morfológicas que más aportan a la clase venenosa:
 
 ![Importancia global SHAP](figuras_modelo_matematico/shap_importancia_test.png)
+
+### 5.4 Descomposición local nativa del Random Forest (usada en la aplicación)
+
+La aplicación explica cada predicción sin librerías externas, con las **contribuciones de camino** (método de Saabas). Sea $p_b(t)$ la proporción de venenosos en el nodo $t$ del árbol $b$, $\text{camino}_b(\mathbf{x}) = (t_0, t_1, \dots, t_L)$ los nodos que recorre $\mathbf{x}$ desde la raíz $t_0$ hasta la hoja $t_L$, y $f(t)$ la característica con la que el nodo $t$ divide los datos:
+
+$$\phi_j^{(b)}(\mathbf{x}) = \sum_{\ell=1}^{L} \mathbb{I}\left(f(t_{\ell-1}) = j\right) \left[ p_b(t_\ell) - p_b(t_{\ell-1}) \right]$$
+
+La suma telescópica de cada camino da $p_b(t_L) = p_b(t_0) + \sum_j \phi_j^{(b)}(\mathbf{x})$; promediando los $B$ árboles se obtiene una descomposición **exacta** de la probabilidad del bosque (§2.3):
+
+$$\hat{P}(Y=1 \mid \mathbf{x}) = \underbrace{\frac{1}{B}\sum_{b=1}^{B} p_b(t_0)}_{\phi_0 \;=\; 0.555} + \sum_{j=1}^{d} \underbrace{\frac{1}{B}\sum_{b=1}^{B} \phi_j^{(b)}(\mathbf{x})}_{\phi_j(\mathbf{x})}$$
+
+Las contribuciones de las columnas One-Hot de una misma variable se suman, $\Phi_k(\mathbf{x}) = \sum_{j \in k} \phi_j(\mathbf{x})$, para reportar las **20 variables morfológicas**. La **importancia global** es $I_k = \frac{1}{n}\sum_{i=1}^{n} |\Phi_k(\mathbf{x}_i)|$ sobre 300 especímenes de test, precalculada en el notebook 03 y guardada en `model_metadata.json`.
+
+El simulador **«¿qué pasaría si…?»** evalúa $\hat{P}(Y=1 \mid \mathbf{x}_{k \leftarrow v})$ para cada valor $v$ de la variable $k$, dejando fijas las demás, y lo compara con $\tau^*$.
