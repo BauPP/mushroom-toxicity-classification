@@ -49,6 +49,31 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------ etiquetas legibles
+ETIQUETAS_VARIABLES = {
+    # Variables métricas (numéricas)
+    "cap-diameter": "Diámetro del sombrero (cm)",
+    "stem-height": "Altura del tallo (cm)",
+    "stem-width": "Ancho del tallo (mm)",
+    # Variables nominales (categóricas)
+    "cap-shape": "Forma del sombrero",
+    "cap-surface": "Superficie del sombrero",
+    "cap-color": "Color del sombrero",
+    "does-bruise-or-bleed": "¿Presenta magulladuras o sangrado?",
+    "gill-attachment": "Inserción de las láminas",
+    "gill-spacing": "Espaciado de las láminas",
+    "gill-color": "Color de las láminas",
+    "stem-root": "Raíz del tallo",
+    "stem-surface": "Superficie del tallo",
+    "stem-color": "Color del tallo",
+    "veil-type": "Tipo de velo",
+    "veil-color": "Color del velo",
+    "has-ring": "¿Tiene anillo?",
+    "ring-type": "Tipo de anillo",
+    "spore-print-color": "Color de la esporada",
+    "habitat": "Hábitat",
+    "season": "Estación / Temporada",
+}
+
 ETIQUETAS_NUMERICAS = {
     "cap-diameter": "Diámetro del sombrero (cm)",
     "stem-height": "Altura del tallo (cm)",
@@ -56,55 +81,185 @@ ETIQUETAS_NUMERICAS = {
 }
 
 ETIQUETAS_CATEGORICAS = {
-    "cap-shape": {"b": "bell (campana)", "c": "conical (cónico)", "x": "convex (convexo)",
-                  "f": "flat (plano)", "s": "sunken (hundido)", "p": "spherical (esférico)",
-                  "o": "others (otros)"},
-    "cap-surface": {"i": "fibrous (fibrosa)", "g": "grooves (surcos)", "y": "scaly (escamosa)",
-                    "s": "smooth (lisa)", "h": "shiny (brillante)", "l": "leathery (coriácea)",
-                    "k": "silky (sedosa)", "t": "sticky (pegajosa)", "w": "wrinkled (arrugada)",
-                    "e": "fleshy (carnosa)"},
-    "cap-color": {"n": "brown (marrón)", "b": "buff (ante)", "g": "gray (gris)", "r": "green (verde)",
-                  "p": "pink (rosa)", "u": "purple (púrpura)", "e": "red (rojo)", "w": "white (blanco)",
-                  "y": "yellow (amarillo)", "l": "blue (azul)", "o": "orange (naranja)", "k": "black (negro)"},
-    "does-bruise-or-bleed": {"t": "sí (magenta/lesión)", "f": "no"},
-    "gill-attachment": {"a": "adnate (adnato)", "x": "adnexed (adnexo)", "d": "decurrent (decurrente)",
-                        "e": "free (libre)", "s": "sinuate (sinuado)", "p": "pores (poros)", "f": "none (ninguno)"},
-    "gill-spacing": {"c": "close (cerradas)", "d": "distant (distantes)", "f": "none (ningunas)"},
-    "gill-color": {"n": "brown (marrón)", "b": "buff (ante)", "g": "gray (gris)", "r": "green (verde)",
-                   "p": "pink (rosa)", "u": "purple (púrpura)", "e": "red (rojo)", "w": "white (blanco)",
-                   "y": "yellow (amarillo)", "l": "blue (azul)", "o": "orange (naranja)", "k": "black (negro)",
-                   "f": "none (ninguno)"},
-    "stem-root": {"b": "bulbous (bulboso)", "s": "swollen (hinchado)", "c": "club (clava)",
-                  "u": "cup (copa)", "e": "equal (igual)", "z": "rhizomorphs (rizomorfos)", "r": "rooted (enraizado)"},
-    "stem-surface": {"i": "fibrous (fibroso)", "g": "grooves (surcos)", "y": "scaly (escamoso)",
-                     "s": "smooth (liso)", "h": "shiny (brillante)", "l": "leathery (coriáceo)",
-                     "k": "silky (sedoso)", "t": "sticky (pegajoso)", "w": "wrinkled (arrugado)",
-                     "f": "none (ninguno)"},
-    "stem-color": {"n": "brown (marrón)", "b": "buff (ante)", "g": "gray (gris)", "r": "green (verde)",
-                   "p": "pink (rosa)", "u": "purple (púrpura)", "e": "red (rojo)", "w": "white (blanco)",
-                   "y": "yellow (amarillo)", "l": "blue (azul)", "o": "orange (naranja)", "k": "black (negro)",
-                   "f": "none (ninguno)"},
-    "veil-type": {"p": "partial (parcial)", "u": "universal"},
-    "veil-color": {"n": "brown (marrón)", "b": "buff (ante)", "g": "gray (gris)", "r": "green (verde)",
-                   "p": "pink (rosa)", "u": "purple (púrpura)", "e": "red (rojo)", "w": "white (blanco)",
-                   "y": "yellow (amarillo)", "l": "blue (azul)", "o": "orange (naranja)", "k": "black (negro)"},
-    "has-ring": {"t": "sí (anillo)", "f": "no"},
-    "ring-type": {"c": "cobwebby (araneoso)", "e": "evanescent (evanescente)", "r": "flaring (expandible)",
-                  "g": "grooved (estriado)", "l": "large (grande)", "p": "pendant (colgante)",
-                  "s": "sheathing (envainante)", "z": "zone (zonal)", "y": "scaly (escamoso)",
-                  "m": "movable (móvil)", "f": "none (ninguno)"},
-    "spore-print-color": {"n": "brown (marrón)", "b": "buff (ante)", "g": "gray (gris)", "r": "green (verde)",
-                          "p": "pink (rosa)", "u": "purple (púrpura)", "e": "red (rojo)", "w": "white (blanco)",
-                          "y": "yellow (amarillo)", "l": "blue (azul)", "o": "orange (naranja)", "k": "black (negro)"},
-    "habitat": {"g": "grasses (pastizales)", "l": "leaves (hojarasca)", "m": "meadows (praderas)",
-                "p": "paths (senderos)", "h": "heaths (brezales)", "u": "urban (urbano)",
-                "w": "waste (desechos)", "d": "woods (bosques)"},
-    "season": {"s": "spring (primavera)", "u": "summer (verano)", "a": "autumn (otoño)", "w": "winter (invierno)"},
+    "cap-shape": {
+        "b": "Campana",
+        "c": "Cónica",
+        "x": "Convexa",
+        "f": "Plana",
+        "s": "Hundida",
+        "p": "Esférica",
+        "o": "Otros",
+    },
+    "cap-surface": {
+        "d": "Seca",
+        "e": "Carnosa",
+        "g": "Surcos",
+        "h": "Brillante",
+        "i": "Fibrosa",
+        "k": "Sedosa",
+        "l": "Coriácea",
+        "s": "Lisa",
+        "t": "Pegajosa",
+        "w": "Arrugada",
+        "y": "Escamosa",
+    },
+    "cap-color": {
+        "n": "Marrón",
+        "b": "Ante (beige)",
+        "g": "Gris",
+        "r": "Verde",
+        "p": "Rosa",
+        "u": "Púrpura",
+        "e": "Rojo",
+        "w": "Blanco",
+        "y": "Amarillo",
+        "l": "Azul",
+        "o": "Naranja",
+        "k": "Negro",
+    },
+    "does-bruise-or-bleed": {
+        "t": "Sí (presenta sangrado o lesión)",
+        "f": "No",
+    },
+    "gill-attachment": {
+        "a": "Adnata (adherida)",
+        "x": "Adnexa",
+        "d": "Decurrente",
+        "e": "Libre",
+        "s": "Sinuada",
+        "p": "Poros",
+        "f": "Ninguna",
+    },
+    "gill-spacing": {
+        "c": "Cerradas (apretadas)",
+        "d": "Distantes (espaciadas)",
+        "f": "Ninguna",
+    },
+    "gill-color": {
+        "n": "Marrón",
+        "b": "Ante (beige)",
+        "g": "Gris",
+        "r": "Verde",
+        "p": "Rosa",
+        "u": "Púrpura",
+        "e": "Rojo",
+        "w": "Blanco",
+        "y": "Amarillo",
+        "l": "Azul",
+        "o": "Naranja",
+        "k": "Negro",
+        "f": "Ninguno",
+    },
+    "stem-root": {
+        "b": "Bulbosa",
+        "s": "Hinchada",
+        "c": "Claviforme (en maza)",
+        "u": "Copa",
+        "e": "Igual (cilíndrica)",
+        "z": "Rizomorfos",
+        "r": "Enraizada",
+        "f": "Fibrosa",
+    },
+    "stem-surface": {
+        "d": "Seca",
+        "e": "Carnosa",
+        "g": "Surcos",
+        "h": "Brillante",
+        "i": "Fibrosa",
+        "k": "Sedosa",
+        "l": "Coriácea",
+        "s": "Lisa",
+        "t": "Pegajosa",
+        "w": "Arrugada",
+        "y": "Escamosa",
+        "f": "Ninguna",
+    },
+    "stem-color": {
+        "n": "Marrón",
+        "b": "Ante (beige)",
+        "g": "Gris",
+        "r": "Verde",
+        "p": "Rosa",
+        "u": "Púrpura",
+        "e": "Rojo",
+        "w": "Blanco",
+        "y": "Amarillo",
+        "l": "Azul",
+        "o": "Naranja",
+        "k": "Negro",
+        "f": "Ninguno",
+    },
+    "veil-type": {
+        "p": "Parcial",
+        "u": "Universal",
+    },
+    "veil-color": {
+        "n": "Marrón",
+        "b": "Ante (beige)",
+        "g": "Gris",
+        "r": "Verde",
+        "p": "Rosa",
+        "u": "Púrpura",
+        "e": "Rojo",
+        "w": "Blanco",
+        "y": "Amarillo",
+        "l": "Azul",
+        "o": "Naranja",
+        "k": "Negro",
+        "f": "Ninguno",
+    },
+    "has-ring": {
+        "t": "Sí (con anillo)",
+        "f": "No",
+    },
+    "ring-type": {
+        "c": "Araneoso (cortina)",
+        "e": "Evanescente (fugaz)",
+        "r": "Abocinado (expandible)",
+        "g": "Estriado",
+        "l": "Grande",
+        "p": "Colgante",
+        "s": "Envainante",
+        "z": "Zonal",
+        "y": "Escamoso",
+        "m": "Móvil",
+        "f": "Ninguno",
+    },
+    "spore-print-color": {
+        "n": "Marrón",
+        "b": "Ante (beige)",
+        "g": "Gris",
+        "r": "Verde",
+        "p": "Rosa",
+        "u": "Púrpura",
+        "e": "Rojo",
+        "w": "Blanco",
+        "y": "Amarillo",
+        "l": "Azul",
+        "o": "Naranja",
+        "k": "Negro",
+    },
+    "habitat": {
+        "g": "Pastizales",
+        "l": "Hojarasca",
+        "m": "Praderas",
+        "p": "Senderos",
+        "h": "Brezales",
+        "u": "Urbano",
+        "w": "Desechos (vertederos)",
+        "d": "Bosques",
+    },
+    "season": {
+        "s": "Primavera",
+        "u": "Verano",
+        "a": "Otoño",
+        "w": "Invierno",
+    },
 }
 
 
 def _opciones(columna: str, valores: list) -> list:
-    """Formatea los códigos de una columna con su etiqueta legible si existe."""
+    """Formatea los códigos de una columna con su etiqueta legible en español."""
     mapa = ETIQUETAS_CATEGORICAS.get(columna, {})
     return [f"{v} — {mapa[v]}" if v in mapa else v for v in valores]
 
@@ -164,14 +319,15 @@ def barra_contribuciones(contribuciones: pd.Series, titulo: str, top: int = 10):
 def fig_que_pasaria_si(escaneo: pd.DataFrame, columna: str, valor_actual, tau: float, numerica: bool):
     """Probabilidad de toxicidad para cada valor posible de una variable."""
     fig, ax = plt.subplots(figsize=(8.5, 3.6))
+    nom_col = ETIQUETAS_VARIABLES.get(columna, columna)
     if numerica:
         ax.plot(escaneo["valor"], escaneo["probabilidad"], color="#1565c0", lw=2)
         ax.axvline(valor_actual, color="#555555", lw=1, linestyle=":", label=f"valor actual ({valor_actual:.2f})")
-        ax.set_xlabel(ETIQUETAS_NUMERICAS.get(columna, columna))
+        ax.set_xlabel(nom_col)
     else:
         mapa = ETIQUETAS_CATEGORICAS.get(columna, {})
         etiquetas = [
-            "sin\ndato" if pd.isna(v) else f"{v}\n{mapa[v].split('(')[-1].rstrip(')')}" if v in mapa else v
+            "sin\ndato" if pd.isna(v) else f"{v}\n{mapa.get(v, v)}"
             for v in escaneo["valor"]
         ]
         colores = ["#c62828" if p >= tau else "#2e7d32" for p in escaneo["probabilidad"]]
@@ -179,11 +335,11 @@ def fig_que_pasaria_si(escaneo: pd.DataFrame, columna: str, valor_actual, tau: f
                   for v in escaneo["valor"]]
         ax.bar(etiquetas, escaneo["probabilidad"], color=colores, edgecolor=bordes, linewidth=2)
         ax.tick_params(axis="x", labelsize=7.5)
-        ax.set_xlabel(f"{columna} (borde negro = valor actual)")
+        ax.set_xlabel(f"{nom_col} (borde negro = valor actual)")
     ax.axhline(tau, color="#000000", lw=1.2, linestyle="--", label=f"umbral τ* = {tau:.2f}")
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("P(venenoso)")
-    ax.set_title(f"¿Qué pasaría si cambia {columna}?", fontsize=11, fontweight="bold")
+    ax.set_title(f"¿Qué pasaría si cambia {nom_col}?", fontsize=11, fontweight="bold")
     ax.legend(loc="lower right", fontsize=8)
     ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
@@ -293,7 +449,9 @@ if PAGINA == "🎯 Predicción individual":
             fila = st.columns(3)
             for col, contenedor in zip(CAT_COLS[i:i + 3], fila):
                 valores_cat[col] = contenedor.selectbox(
-                    col, _opciones(col, META["categorical_values"][col]), index=0,
+                    ETIQUETAS_VARIABLES.get(col, col),
+                    _opciones(col, META["categorical_values"][col]),
+                    index=0,
                 )
         ejecutar = st.form_submit_button("🔎 Clasificar espécimen", width="stretch")
 
@@ -330,7 +488,23 @@ if PAGINA == "🎯 Predicción individual":
             st.success("✅ Espécimen clasificado como comestible bajo la garantía de riesgo cero.")
 
         with st.expander("Ver características ingresadas"):
-            st.dataframe(pd.DataFrame([fila]).T.rename(columns={0: "valor"}).astype(str), width="stretch")
+            datos_mostrar = []
+            for col in TODAS_LAS_COLS:
+                val = fila.get(col)
+                nom_var = ETIQUETAS_VARIABLES.get(col, col)
+                if col in NUM_COLS:
+                    unidad = "cm" if "diameter" in col or "height" in col else "mm"
+                    val_str = f"{float(val):.2f} {unidad}"
+                else:
+                    desc = ETIQUETAS_CATEGORICAS.get(col, {}).get(val, val)
+                    if desc != val:
+                        val_str = f"{desc} ({val})"
+                    else:
+                        val_str = str(val)
+                datos_mostrar.append({"Característica": nom_var, "Valor": val_str})
+
+            df_caracteristicas = pd.DataFrame(datos_mostrar)
+            st.dataframe(df_caracteristicas, width="stretch", hide_index=True)
 
 # ================================================================== 2. PREDICCIÓN POR LOTES
 if PAGINA == "📦 Predicción por lotes":
@@ -449,7 +623,9 @@ elif PAGINA == "🔍 Explicabilidad (XAI)":
             f"+ aporte de cada variable = **{base + por_variable.sum():.1%}**. "
             "Rojo empuja hacia venenoso; verde, hacia comestible."
         )
-        st.pyplot(barra_contribuciones(por_variable, "Aporte de cada variable a P(venenoso)"))
+        por_variable_es = por_variable.copy()
+        por_variable_es.index = [ETIQUETAS_VARIABLES.get(c, c) for c in por_variable_es.index]
+        st.pyplot(barra_contribuciones(por_variable_es, "Aporte de cada variable a P(venenoso)"))
         with st.expander("Ver el detalle por característica codificada (One-Hot)"):
             detalle = pd.DataFrame({"característica": FEATURE_NAMES, "aporte": contrib[0]})
             detalle = detalle[detalle["aporte"] != 0].sort_values("aporte", key=np.abs, ascending=False)
@@ -464,7 +640,9 @@ elif PAGINA == "🔍 Explicabilidad (XAI)":
     st.markdown("#### 2. ¿Qué pasaría si…?")
     st.caption("Cambia una variable del espécimen a todos sus valores posibles y observa la probabilidad.")
     columna = st.selectbox(
-        "Variable a simular", TODAS_LAS_COLS,
+        "Variable a simular",
+        TODAS_LAS_COLS,
+        format_func=lambda c: ETIQUETAS_VARIABLES.get(c, c),
         index=TODAS_LAS_COLS.index(por_variable.abs().idxmax()) if MODELO_DE_ARBOLES else 0,
     )
     numerica = columna in NUM_COLS
@@ -490,7 +668,8 @@ elif PAGINA == "🔍 Explicabilidad (XAI)":
     if importancia is None:
         st.warning("Este modelo no expone importancias globales.")
     else:
-        top = importancia.head(12)[::-1]
+        top = importancia.head(12)[::-1].copy()
+        top.index = [ETIQUETAS_VARIABLES.get(c, c) for c in top.index]
         fig, ax = plt.subplots(figsize=(8, 4.6))
         ax.barh(top.index, top.values * 100, color="#1565c0")
         ax.set_title("Variables que más pesan en las decisiones del modelo", fontsize=11, fontweight="bold")
@@ -517,17 +696,24 @@ elif PAGINA == "🍄 Exploración del dataset":
         fig, ejes = plt.subplots(1, 3, figsize=(10.5, 3.6))
         for ax, col in zip(ejes, NUM_COLS):
             sns.histplot(DF[col], bins=40, ax=ax, color="#1565c0")
-            ax.set_title(col, fontsize=10)
+            ax.set_title(ETIQUETAS_VARIABLES.get(col, col), fontsize=10)
             ax.set_xlabel("")
         plt.tight_layout()
         st.pyplot(fig)
 
     st.markdown("**Explorador de variables categóricas:**")
-    col_sel = st.selectbox("Variable", CAT_COLS, index=CAT_COLS.index("gill-color") if "gill-color" in CAT_COLS else 0)
+    col_sel = st.selectbox(
+        "Variable",
+        CAT_COLS,
+        format_func=lambda c: ETIQUETAS_VARIABLES.get(c, c),
+        index=CAT_COLS.index("gill-color") if "gill-color" in CAT_COLS else 0,
+    )
     top = DF[col_sel].value_counts().head(12)
+    mapa_sel = ETIQUETAS_CATEGORICAS.get(col_sel, {})
+    etiquetas_cat = [f"{k}\n({mapa_sel.get(k, k)})" for k in top.index]
     fig, ax = plt.subplots(figsize=(8.5, 3.8))
-    ax.bar(top.index, top.values, color="#ef6c00")
-    ax.set_title(f"Frecuencia de categorías — {col_sel} (top 12)", fontsize=12, fontweight="bold")
+    ax.bar(etiquetas_cat, top.values, color="#ef6c00")
+    ax.set_title(f"Frecuencia de categorías — {ETIQUETAS_VARIABLES.get(col_sel, col_sel)} (top 12)", fontsize=12, fontweight="bold")
     ax.set_ylabel("registros")
     plt.tight_layout()
     st.pyplot(fig)

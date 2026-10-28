@@ -32,3 +32,4 @@ Thumbs.db
 
 # Artefactos de sesion de ZCode
 .zcode/
+.claude/
