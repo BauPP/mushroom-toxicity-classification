@@ -29,7 +29,7 @@ $$J(\mathbf{w}) = -\frac{1}{N} \sum_{i=1}^N \left[ y_i \ln(\sigma(\mathbf{w}^T \
 ### 1.3 Regla de Decisión y Umbral Asimétrico ($\tau$)
 $$\hat{y} = \begin{cases} 1 & \text{si } P(Y=1 \mid \mathbf{x}) \ge \tau \\ 0 & \text{si } P(Y=1 \mid \mathbf{x}) < \tau \end{cases}$$
 
-Bajo el enfoque estándar $\tau = 0.50$. En nuestra **metodología de riesgo cero**, $\tau^*$ se calibra sobre el modelo que se despliega en producción: la Regresión Logística ilustra el efecto con $\tau^* < 0.50$; el modelo ganador (Random Forest) opera con $\tau^* = 0.67$ en la rejilla extendida $\tau \in [0.01, 0.95]$ — ver §5.3.
+Bajo el enfoque estándar $\tau = 0.50$. En nuestra **metodología de riesgo cero**, $\tau^*$ se calibra sobre el modelo que se despliega en producción: la Regresión Logística ilustra el efecto con $\tau^* < 0.50$; el modelo ganador (Random Forest) opera con $\tau^* = 0.52$, el centro de la franja sin errores de una validación cruzada 5-fold — ver §5.2.
 
 ![Sigmoide y Binary Cross-Entropy](figuras_modelo_matematico/esquema_sigmoide_bce.png)
 
@@ -78,6 +78,7 @@ $$\mathcal{L}^{(t)} = \sum_{i=1}^N l\left(y_i, \hat{y}_i^{(t-1)} + f_t(\mathbf{x
 
 El término de complejidad del árbol $\Omega(f_t)$ es:
 $$\Omega(f_t) = \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2$$
+
 - $T$: Número de hojas del árbol.
 - $w_j$: Puntuación de peso (*leaf weight*) en la hoja $j$.
 - $\gamma, \lambda$: Hiperparámetros de penalización de complejidad y regularización $L_2$.
@@ -155,14 +156,25 @@ Dada la matriz de confusión con Verdaderos Positivos ($TP$), Falsos Negativos (
   $$\text{F1} = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}} = \frac{2 TP}{2 TP + FP + FN}$$
 
 ### 5.2 Formulación Matemática del Umbral de Riesgo Cero ($\tau^*$)
-$$\tau^* = \max \left\{ \tau \in (0, 0.95] \;\middle|\; FN(\tau) = 0 \right\}$$
-
-Donde:
+Los falsos negativos que produce un umbral $\tau$ son:
 $$FN(\tau) = \sum_{i=1}^N \mathbb{I}\left( y_i = 1 \;\land\; P(Y=1 \mid \mathbf{x}_i) < \tau \right)$$
 
-El barrido se realiza sobre la rejilla $\tau \in [0.01, 0.95]$ con paso $0.01$ usando las probabilidades del **modelo ganador** en validación. Extender la búsqueda por encima del umbral por defecto ($0.50$) permite maximizar la precisión sin romper la garantía de $FN = 0$: a mayor $\tau$, menos falsos positivos, mientras el recall de la clase venenosa permanezca en 100 %.
+y el mayor umbral sin falsos negativos, buscado en la rejilla $\tau \in [0.01, 0.95]$ con paso $0.01$, es:
+$$\tau_{\max} = \max \left\{ \tau \in (0, 0.95] \;\middle|\; FN(\tau) = 0 \right\}$$
 
-**Resultado de la calibración (Random Forest, modelo ganador):** $\tau^* = 0.67$, con $FN(\tau^*) = 0$ y recall de la clase venenosa del 100 % en validación.
+Elegir $\tau_{\max}$ tiene dos problemas: con un único split de validación depende de qué especímenes cayeron en él, y por construcción queda en el **borde** de la región sin falsos negativos, sin margen de seguridad.
+
+**Calibración con validación cruzada.** El umbral se calibra con una validación cruzada estratificada de $k = 5$ particiones sobre Train + Validación (51.908 registros; el test no interviene). En cada partición se entrena un pipeline nuevo, preprocesador incluido, solo con las otras $k-1$ (sin fuga de datos), y se estima la probabilidad $\hat{p}^{\,\text{oof}}_i$ de cada registro con el modelo que no lo vio al entrenar (probabilidad *fuera de partición*). Con ellas se delimita la franja sin errores, entre el comestible con mayor probabilidad ($a$) y el venenoso con menor probabilidad ($b$):
+
+$$a = \max_{i:\, y_i = 0} \hat{p}^{\,\text{oof}}_i, \qquad b = \min_{i:\, y_i = 1} \hat{p}^{\,\text{oof}}_i$$
+
+Si $a < b$, todo $\tau \in (a, b]$ da $FN = 0$ y $FP = 0$, y $\tau_{\max}$ coincide con $b$. El umbral desplegado es el **centro de la franja**, redondeado hacia abajo a la centésima (el lado que protege de los falsos negativos), para quedar a la misma distancia de ambos errores:
+
+$$\tau^* = \frac{\lfloor 50\,(a + b) \rfloor}{100}$$
+
+El cálculo está en `recalibrar_umbral_cv.py`.
+
+**Resultado de la calibración (Random Forest, modelo ganador):** el umbral más alto con $FN = 0$ en cada partición fue $0.77,\ 0.74,\ 0.87,\ 0.76$ y $0.61$; el valor obtenido con un único split de validación ($0.67$) dejaba pasar un hongo venenoso en la quinta. Fuera de partición, $a = 0.44$ y $b = 0.61$, de modo que $\tau^* = 0.52$, con un margen de $0.08$ hacia los comestibles y $0.09$ hacia los venenosos. Con $\tau^* = 0.52$: $FN = 0$ y $FP = 0$ en las cinco particiones, en validación y en test (en test la franja va de $0.34$ a $0.67$).
 
 ### 5.3 Evidencia Empírica en el Conjunto de Prueba (Test)
 
@@ -183,7 +195,7 @@ Los gráficos siguientes son generados por `notebooks/03_model_training.ipynb` s
 
 ![Matrices de confusión de los 4 modelos en test](figuras_modelo_matematico/matrices_confusion_test.png)
 
-**Calibración del umbral de riesgo cero** sobre el modelo ganador:
+**Calibración del umbral de riesgo cero** sobre el modelo ganador, con probabilidades fuera de partición de la validación cruzada 5-fold (generada por `recalibrar_umbral_cv.py`). La franja sombreada no tiene falsos negativos ni falsos positivos, y $\tau^*$ está en su centro:
 
 ![Ajuste asimétrico de umbral del modelo ganador](figuras_modelo_matematico/ajuste_umbral_modelo_ganador.png)
 

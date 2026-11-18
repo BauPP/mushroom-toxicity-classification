@@ -23,13 +23,15 @@ flowchart TD
     E --> E1["§1 Entrenamiento de 4 modelos:<br/>Logistic Regression · Random Forest<br/>XGBoost · MLP — métricas en validación"]
     E1 --> E2["§2 Evaluación final en TEST:<br/>Acc · Prec · Rec · F1 · ROC-AUC<br/>+ curvas ROC + matrices de confusión"]
     E2 --> E3["§3 Selección por evidencia:<br/>FN=0 → F1 → ROC-AUC → tiempo<br/>⇒ GANADOR: Random Forest"]
-    E3 --> E4["§4 Calibración de umbral de riesgo cero:<br/>τ* = máx{τ : FN(τ)=0} = 0.67"]
+    E3 --> E4["§4 Calibración de umbral de riesgo cero:<br/>τ* = máx{τ : FN(τ)=0} en un split (0.67)"]
     E4 --> E5["§5 Explicabilidad:<br/>SHAP global + LIME local"]
     E5 --> F["§6 Serialización (joblib)"]
     F --> F1["app/models/preprocessor.joblib"]
     F --> F2["app/models/best_model.joblib"]
     F --> F3["app/models/pipeline.joblib"]
     F --> F4["app/models/model_metadata.json<br/>(τ*, métricas val/test, esquema)"]
+    F4 --> H["recalibrar_umbral_cv.py<br/>Validación cruzada 5-fold sobre Train + Val<br/>franja sin errores fuera de fold (0.44 – 0.61)<br/>τ* = centro = 0.52"]
+    H --> F4
     F1 & F2 & F3 & F4 --> G["app/app.py — Streamlit<br/>Inferencia en tiempo real<br/>10+ funcionalidades"]
 ```
 
@@ -44,12 +46,13 @@ flowchart TD
 | 5 | **Entrenamiento de 4 modelos** | Train + preprocesador | `notebooks/03_model_training.ipynb` §1 + `src/models.py:get_candidate_models` | 4 pipelines ajustados en memoria | Validación: LR 86,8 % · RF 100 % · XGB 99,4 % · MLP 100 % |
 | 6 | **Evaluación final en TEST** | Test (datos nunca vistos) | `notebooks/03_model_training.ipynb` §2 | `df_test_comparison` + 3 figuras | Test: LR 86,7 % · **RF 100 %** · XGB 99,4 % (prec. 99,8 %) · MLP 100 %; 3 de 4 modelos con precisión > 95 % |
 | 7 | **Selección del modelo ganador** | Métricas de test | `notebooks/03_model_training.ipynb` §3 (criterio jerárquico) | `best_model_name` = **Random Forest** | Empate técnico RF/MLP (todo 1,0) → desempate por tiempo de entrenamiento (1,25 s vs 3,73 s) |
-| 8 | **Calibración de umbral (riesgo cero)** | Probabilidades del ganador en validación | `notebooks/03_model_training.ipynb` §4 + `src/utils.py:evaluate_thresholds`, `find_zero_fn_threshold` | $\tau^* = 0{,}67$ | $FN(\tau^*) = 0$ con recall 100 % en la clase venenosa |
+| 8 | **Calibración de umbral (riesgo cero)** | Probabilidades del ganador en validación | `notebooks/03_model_training.ipynb` §4 + `src/utils.py:evaluate_thresholds`, `find_zero_fn_threshold` | $\tau = 0{,}67$ (split único; reemplazado en el paso 14) | $FN = 0$ en ese split de validación |
 | 9 | **Explicabilidad global (SHAP)** | Test transformado (muestra de 300) | `notebooks/03_model_training.ipynb` §5.1 (TreeExplainer) | Ranking de importancia morfológica | `docs/figuras_modelo_matematico/shap_importancia_test.png` |
 | 10 | **Explicabilidad local (LIME)** | Instancia #0 de test | `notebooks/03_model_training.ipynb` §5.2 (LimeTabularExplainer) | Pesos locales por característica | Salida impresa en el notebook con impacto por rasgo |
 | 11 | **Serialización** | Objetos en memoria | `notebooks/03_model_training.ipynb` §6 (`joblib.dump`) | `app/models/preprocessor.joblib` · `best_model.joblib` · `pipeline.joblib` · `model_metadata.json` | Metadatos: τ*, criterio, métricas val/test, matriz de confusión, categorías y rangos |
 | 12 | **Verificación de inferencia** | Artefactos serializados | `notebooks/03_model_training.ipynb` §6.1 | Dictamen de una muestra real de test | Probabilidad + umbral aplicado + etiqueta real coincidente |
-| 13 | **Despliegue local (demo)** | Artefactos + `app/models/model_metadata.json` | `app/app.py` (Streamlit) | Aplicación interactiva | Predicción individual y por lotes, explicabilidad y dashboard de métricas |
+| 13 | **Despliegue local (demo)** | Artefactos + `app/models/model_metadata.json` | `app/app.py` (Streamlit) | Aplicación interactiva | Predicción individual y por lotes, explicabilidad, dashboard de métricas y validación cruzada |
+| 14 | **Recalibración de τ\* con validación cruzada** | Train + Validación (51.908 registros; el test no participa) | `recalibrar_umbral_cv.py` + `src/validation.py:validacion_cruzada_modelo` (5-fold estratificado, pipeline nuevo por fold) | `optimal_threshold` = $0{,}52$ y bloque `threshold_calibration` en `model_metadata.json`; `ajuste_umbral_modelo_ganador.png` | Franja sin errores fuera de fold: 0,44 – 0,61 → $\tau^*$ = centro = 0,52 (margen 0,08 / 0,09). Umbral más alto con FN = 0 por fold: 0,77 · 0,74 · 0,87 · 0,76 · 0,61 (con 0,67 el fold 5 tenía 1 FN). Con 0,52: FN = 0 y FP = 0 en los 5 folds y en test |
 
 ## 3. Cadena de custodia del dato (resumen de una predicción)
 
@@ -59,7 +62,7 @@ Registro crudo (20 características + clase)
   → get_train_val_test_data() ............... split estratificado seed=42 (aislado en test)
   → preprocessor.joblib (ColumnTransformer) . imputación → escalado → One-Hot (128 features)
   → best_model.joblib (RandomForest) ........ P(venenoso) = predict_proba[:, 1]
-  → regla de decisión τ* = 0.67 ............. venenoso ⟺ P ≥ 0.67  (garantía FN = 0)
+  → regla de decisión τ* = 0.52 ............. venenoso ⟺ P ≥ 0.52  (FN = 0 y FP = 0 en los 5 folds y en test)
   → model_metadata.json ..................... esquema, umbral y métricas de soporte
   → app/app.py .............................. dictamen interactivo al usuario
 ```
@@ -81,7 +84,11 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb
 jupyter nbconvert --to notebook --execute --inplace notebooks/02_preprocessing.ipynb
 jupyter nbconvert --to notebook --execute --inplace notebooks/03_model_training.ipynb
 
-# 4. Demo local
+# 4. Recalibración de τ* con validación cruzada (después del notebook 03,
+#    que reescribe model_metadata.json y la figura del umbral)
+python recalibrar_umbral_cv.py
+
+# 5. Demo local
 streamlit run app/app.py
 ```
 
