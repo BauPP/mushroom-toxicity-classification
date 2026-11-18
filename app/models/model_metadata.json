@@ -2,7 +2,68 @@
     "model_name": "Random Forest",
     "model_class": "RandomForestClassifier",
     "selection_criteria": "FN=0 en test (riesgo cero) -> F1-Score -> ROC-AUC -> menor tiempo de entrenamiento",
-    "optimal_threshold": 0.67,
+    "optimal_threshold": 0.52,
+    "threshold_calibration": {
+        "rule": "centro de la franja sin errores fuera de fold, redondeado hacia abajo a 0.01",
+        "method": "Validación cruzada estratificada 5-fold sobre Train + Validación (random_state=42), con un pipeline nuevo por fold. τ* es el centro de la franja sin errores de las probabilidades fuera de fold (entre el comestible con mayor P(venenoso) y el venenoso con menor P(venenoso)), redondeado hacia abajo a 0.01. El test no participa.",
+        "k_folds": 5,
+        "random_state": 42,
+        "cv_out_of_fold_band": {
+            "max_proba_edible": 0.44,
+            "min_proba_poisonous": 0.61
+        },
+        "margin_to_edible": 0.08,
+        "margin_to_poisonous": 0.09,
+        "edge_threshold": 0.61,
+        "fold_thresholds": [
+            0.77,
+            0.74,
+            0.87,
+            0.76,
+            0.61
+        ],
+        "fold_fn_at_threshold": [
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "fold_fp_at_threshold": [
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "single_split_threshold": 0.67,
+        "fold_fn_at_single_split_threshold": [
+            0,
+            0,
+            0,
+            0,
+            1
+        ],
+        "test_at_threshold": {
+            "tn": 4077,
+            "fp": 0,
+            "fn": 0,
+            "tp": 5084,
+            "precision": 1.0,
+            "recall": 1.0
+        },
+        "test_at_single_split_threshold": {
+            "tn": 4077,
+            "fp": 0,
+            "fn": 0,
+            "tp": 5084,
+            "precision": 1.0,
+            "recall": 1.0
+        },
+        "test_min_proba_poisonous": 0.67,
+        "test_max_proba_edible": 0.34,
+        "calibrated_at": "2026-11-16T16:04:01"
+    },
     "classes": {
         "0": "edible",
         "1": "poisonous"

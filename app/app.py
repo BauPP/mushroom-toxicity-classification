@@ -19,6 +19,7 @@ Funcionalidades:
  11. Exploración del dataset (INFOVIZ: balance, distribuciones, categorías).
  12. Descarga de resultados de predicción por lotes + plantilla CSV.
  13. Ficha técnica del modelo y documentación matemática embebida.
+ 14. Validación cruzada estratificada k-fold sin fuga de datos (pipeline por fold, test excluido).
 
 Ejecución:
     streamlit run app/app.py
@@ -40,7 +41,14 @@ DATA_PATH = ROOT / "data" / "raw" / "secondary_data.csv"
 FORMULAS_PATH = ROOT / "docs" / "formulas_matematicas_modelos.md"
 
 sys.path.insert(0, str(ROOT))
+from src.data_loader import get_train_val_test_data  # noqa: E402
 from src.utils import aggregate_by_original, tree_path_contributions, what_if_scan  # noqa: E402
+from src.validation import (  # noqa: E402
+    METRICAS_CV,
+    filas_repetidas_entre,
+    resumen_validacion_cruzada,
+    validacion_cruzada_modelo,
+)
 
 st.set_page_config(
     page_title="Clasificación de Toxicidad de Hongos",
@@ -376,9 +384,153 @@ def fig_comparativa(df_metricas: pd.DataFrame):
     return fig
 
 
+# ------------------------------------------------------------------ validación cruzada
+COLORES_MODELOS = {
+    "Logistic Regression": "#8e24aa",
+    "Random Forest": "#2e7d32",
+    "XGBoost": "#ef6c00",
+    "MLP Neural Network": "#1565c0",
+}
+SEGUNDOS_POR_FOLD = {"Logistic Regression": 1.7, "Random Forest": 1.6, "XGBoost": 1.4, "MLP Neural Network": 4.2}
+
+
+@st.cache_data(show_spinner=False)
+def particion_desarrollo():
+    """Reproduce la partición 70/15/15 del notebook 03 (random_state=42).
+
+    Devuelve el conjunto de desarrollo (Train + Validación), su objetivo binario y
+    las comprobaciones de fuga frente al TEST, que nunca entra en la validación cruzada.
+    """
+    X_tr, X_va, X_te, y_tr, y_va, _ = get_train_val_test_data(cargar_dataset())
+    X_dev = pd.concat([X_tr, X_va])
+    y_dev = pd.concat([y_tr, y_va]).map({"e": 0, "p": 1}).astype(int)
+    controles = {
+        "n_desarrollo": len(X_dev),
+        "n_test": len(X_te),
+        "indices_compartidos": len(X_dev.index.intersection(X_te.index)),
+        "test_repetidas_en_desarrollo": filas_repetidas_entre(X_dev, X_te),
+        "duplicados_dataset": int(cargar_dataset().duplicated().sum()),
+    }
+    return X_dev, y_dev, controles
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def cv_modelo(nombre_modelo: str, k: int, tau: float) -> pd.DataFrame:
+    X_dev, y_dev, _ = particion_desarrollo()
+    return validacion_cruzada_modelo(nombre_modelo, X_dev, y_dev, NUM_COLS, CAT_COLS, k=k, tau=tau)
+
+
+def fig_esquema_folds(k: int):
+    fig, ax = plt.subplots(figsize=(8, 0.36 * k + 0.9))
+    for fila in range(k):
+        y = k - 1 - fila
+        for col in range(k):
+            valida = fila == col
+            ax.add_patch(plt.Rectangle((col, y), 0.94, 0.8, color="#ef6c00" if valida else "#bbdefb"))
+            ax.text(col + 0.47, y + 0.4, "valida" if valida else "entrena", ha="center", va="center",
+                    fontsize=8 if k <= 5 else 6.5, color="white" if valida else "#0d47a1")
+    ax.set_xlim(-0.05, k)
+    ax.set_ylim(-0.1, k)
+    ax.set_yticks([k - 1 - f + 0.4 for f in range(k)])
+    ax.set_yticklabels([f"Iteración {f + 1}" for f in range(k)], fontsize=8)
+    ax.set_xticks([])
+    for borde in ax.spines.values():
+        borde.set_visible(False)
+    ax.set_title(f"{k}-fold estratificado sobre Train + Validación (el test queda fuera)",
+                 fontsize=10, fontweight="bold")
+    plt.tight_layout()
+    return fig
+
+
+def fig_metricas_cv(resultados: pd.DataFrame):
+    """Puntos = cada fold; rombo negro = media ± desviación estándar."""
+    modelos = list(resultados["Model"].unique())
+    metricas = ["Accuracy", "Precision", "Recall (Poisonous)", "F1-Score"]
+    fig, ejes = plt.subplots(2, 2, figsize=(10, 1.6 + 0.9 * len(modelos)), sharey=True)
+    for ax, metrica in zip(ejes.flat, metricas):
+        for i, modelo in enumerate(modelos):
+            valores = resultados.loc[resultados["Model"] == modelo, metrica].to_numpy()
+            desplazamiento = np.linspace(-0.18, 0.18, len(valores))
+            ax.scatter(valores, i + desplazamiento, s=26, alpha=0.75, color=COLORES_MODELOS.get(modelo, "#555555"))
+            ax.errorbar(valores.mean(), i, xerr=valores.std(ddof=1), fmt="D", color="black", ms=5, capsize=4)
+        ax.set_yticks(range(len(modelos)))
+        ax.set_yticklabels(modelos, fontsize=9)
+        ax.set_title(metrica, fontsize=10, fontweight="bold")
+        ax.grid(True, axis="x", alpha=0.3)
+        minimo = resultados[metrica].min()
+        ax.set_xlim(max(0.0, minimo - 0.02), 1.005)
+    ejes[0, 0].invert_yaxis()
+    fig.suptitle("Métrica obtenida en cada fold (umbral 0.5)", fontsize=11, fontweight="bold")
+    plt.tight_layout()
+    return fig
+
+
+def fig_tau_por_fold(resultados_modelo: pd.DataFrame, tau: float, nombre_modelo: str):
+    taus = resultados_modelo["τ* del fold"].to_numpy()
+    etiquetas = [f"Fold {f}" for f in resultados_modelo["Fold"]]
+    fig, ax = plt.subplots(figsize=(8, 3.3))
+    barras = ax.bar(etiquetas, taus, color=["#2e7d32" if t >= tau else "#c62828" for t in taus])
+    ax.bar_label(barras, labels=[f"{t:.2f}" for t in taus], padding=2, fontsize=9)
+    ax.axhline(tau, color="#000000", lw=1.2, linestyle="--", label=f"τ* desplegado = {tau:.2f}")
+    ax.set_ylim(0, 1.22)
+    ax.set_ylabel("Umbral más alto con FN = 0")
+    ax.set_title(f"Umbral más alto sin falsos negativos en cada fold — {nombre_modelo}", fontsize=11,
+                 fontweight="bold")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, axis="y", alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+def tabla_resumen_cv(resumen: pd.DataFrame) -> pd.DataFrame:
+    tabla = pd.DataFrame({"Modelo": resumen["Model"]})
+    for metrica in METRICAS_CV:
+        tabla[metrica] = [
+            f"{m:.4f} ± {d:.4f}" for m, d in zip(resumen[f"{metrica} (media)"], resumen[f"{metrica} (desv.)"])
+        ]
+    tabla["FN totales (0.5)"] = resumen["FN totales (0.5)"]
+    tabla[f"FN totales (τ={TAU:.2f})"] = resumen["FN totales (τ*)"]
+    tabla[f"Folds con FN = 0 (τ={TAU:.2f})"] = resumen["Folds con FN = 0 (τ*)"]
+    tabla["Umbral más alto con FN = 0 (peor fold)"] = resumen["τ* mínimo entre folds"].map(lambda t: f"{t:.2f}")
+    tabla["Tiempo medio por fold (s)"] = resumen["Tiempo medio (s)"].map(lambda t: f"{t:.2f}")
+    return tabla
+
+
+def tabla_cv_vs_test(resumen: pd.DataFrame, metricas_test: list) -> pd.DataFrame:
+    """¿El resultado del único split de test cae dentro de la variabilidad de la validación cruzada?"""
+    test = pd.DataFrame(metricas_test).set_index("Model")
+    filas = []
+    for _, r in resumen.iterrows():
+        if r["Model"] not in test.index:
+            continue
+        for metrica in ["Accuracy", "Recall (Poisonous)", "F1-Score", "ROC-AUC"]:
+            media, desv = r[f"{metrica} (media)"], r[f"{metrica} (desv.)"]
+            valor_test = float(test.loc[r["Model"], metrica])
+            filas.append({
+                "Modelo": r["Model"],
+                "Métrica": metrica,
+                "Validación cruzada (media ± desv.)": f"{media:.4f} ± {desv:.4f}",
+                "Test (split único)": f"{valor_test:.4f}",
+                "¿Test dentro de media ± 2·desv.?": "✅ sí" if abs(valor_test - media) <= 2 * desv + 1e-3 else "⚠️ no",
+            })
+    return pd.DataFrame(filas)
+
+
 # ------------------------------------------------------------------ recursos globales
 PIPELINE, PREPROCESSOR, MODEL, META = cargar_recursos()
 TAU = float(META["optimal_threshold"])
+CALIBRACION = META.get("threshold_calibration") or {}
+ORIGEN_TAU = f"validación cruzada {CALIBRACION['k_folds']}-fold" if CALIBRACION else "un split de validación"
+if CALIBRACION.get("cv_out_of_fold_band") and "margin_to_edible" in CALIBRACION:
+    _franja = CALIBRACION["cv_out_of_fold_band"]
+    REGLA_TAU = (
+        f"τ* está en el centro de la franja sin errores de la {ORIGEN_TAU} "
+        f"({_franja['max_proba_edible']:.2f} – {_franja['min_proba_poisonous']:.2f}): FN = 0 y FP = 0 en "
+        f"todos los folds, con un margen de {CALIBRACION['margin_to_edible']:.2f} hacia los comestibles y de "
+        f"{CALIBRACION['margin_to_poisonous']:.2f} hacia los venenosos."
+    )
+else:
+    REGLA_TAU = f"τ* es el umbral más alto con 0 falsos negativos en {ORIGEN_TAU}."
 NUM_COLS = META["numeric_features"]
 CAT_COLS = META["categorical_features"]
 TODAS_LAS_COLS = NUM_COLS + CAT_COLS
@@ -398,6 +550,7 @@ PAGINA = st.sidebar.radio(
         "🎯 Predicción individual",
         "📦 Predicción por lotes",
         "📊 Rendimiento del modelo",
+        "🔁 Validación cruzada",
         "🔍 Explicabilidad (XAI)",
         "🍄 Exploración del dataset",
         "📖 Ficha técnica y fórmulas",
@@ -408,14 +561,14 @@ st.sidebar.markdown(
     f"""
 **Modelo desplegado:** {META["model_name"]} ({META.get("model_class", "—")})
 
-**Umbral de riesgo cero:** τ\\* = {TAU:.2f}
+**Umbral de riesgo cero:** τ\\* = {TAU:.2f} ({ORIGEN_TAU})
 
 **Precisión en test:** {META["best_model_test_metrics"]["Precision"]:.1%}
 
 **Entrenado:** {META.get("trained_at", "—")}
 """
 )
-st.sidebar.caption("Metodología de riesgo cero: FN = 0 garantizado en validación.")
+st.sidebar.caption(f"Metodología de riesgo cero: {REGLA_TAU}")
 
 st.title("🍄 Sistema Inteligente de Clasificación Micológica")
 st.markdown(
@@ -474,7 +627,7 @@ if PAGINA == "🎯 Predicción individual":
         st.markdown("**Efecto del umbral de decisión (metodología de riesgo cero):**")
         tau_usuario = st.slider(
             "Umbral τ", min_value=0.01, max_value=0.95, value=TAU, step=0.01,
-            help="τ* = 0.67 fue calibrado en validación como el umbral más alto con 0 falsos negativos.",
+            help=f"τ* = {TAU:.2f}. {REGLA_TAU}",
         )
         if tau_usuario != TAU:
             dictamen_alt = proba >= tau_usuario
@@ -592,6 +745,139 @@ elif PAGINA == "📊 Rendimiento del modelo":
     )
     with st.expander("Ver métricas de validación (usadas para decisiones de diseño)"):
         st.dataframe(pd.DataFrame(META["validation_metrics"]), width="stretch", hide_index=True)
+
+# ================================================================== 3b. VALIDACIÓN CRUZADA
+elif PAGINA == "🔁 Validación cruzada":
+    st.subheader("Validación cruzada estratificada (k-fold) sin fuga de datos")
+    st.markdown(
+        "Un solo split train/test puede salir «con suerte». La validación cruzada divide el conjunto de "
+        "desarrollo en **k partes**, entrena **k veces** dejando fuera una parte distinta cada vez y "
+        "reporta la **media ± desviación estándar**. Si la desviación es pequeña, el rendimiento es estable "
+        "y no depende de cómo cayó la partición."
+    )
+
+    MODELOS_DISPONIBLES = list(COLORES_MODELOS)
+    with st.form("formulario_cv"):
+        c_mod, c_k = st.columns([2, 1])
+        modelos_elegidos = c_mod.multiselect(
+            "Modelos a validar", MODELOS_DISPONIBLES, default=MODELOS_DISPONIBLES,
+            help="Se entrena un pipeline nuevo (preprocesamiento + modelo) en cada fold.",
+        )
+        k_elegido = c_k.select_slider("Número de folds (k)", options=[3, 5, 10], value=5)
+        estimado = sum(SEGUNDOS_POR_FOLD.get(m, 2) for m in modelos_elegidos) * k_elegido
+        st.caption(f"Tiempo estimado la primera vez: ~{estimado:.0f} s. Después queda en caché y es instantáneo.")
+        ejecutar_cv = st.form_submit_button("▶️ Ejecutar validación cruzada", width="stretch")
+
+    if ejecutar_cv:
+        if not modelos_elegidos:
+            st.warning("Elige al menos un modelo.")
+        else:
+            st.session_state["cv_config"] = (tuple(modelos_elegidos), int(k_elegido))
+
+    st.pyplot(fig_esquema_folds(int(k_elegido)))
+
+    config = st.session_state.get("cv_config")
+    if config is None:
+        st.info("Elige los modelos y el número de folds, y pulsa **Ejecutar validación cruzada**.")
+    else:
+        modelos_cv, k_cv = config
+        X_dev, y_dev, controles = particion_desarrollo()
+        partes = []
+        with st.status(f"Validación cruzada {k_cv}-fold en curso...", expanded=False) as estado:
+            for i, modelo in enumerate(modelos_cv, start=1):
+                estado.update(label=f"[{i}/{len(modelos_cv)}] Validando {modelo} ({k_cv} folds)...")
+                partes.append(cv_modelo(modelo, k_cv, TAU))
+            estado.update(label=f"Validación cruzada {k_cv}-fold completada", state="complete")
+        resultados_cv = pd.concat(partes, ignore_index=True)
+        resumen_cv = resumen_validacion_cruzada(resultados_cv)
+
+        st.markdown(f"#### Resultados: {k_cv}-fold sobre {controles['n_desarrollo']:,} especímenes de desarrollo")
+        st.dataframe(tabla_resumen_cv(resumen_cv), width="stretch", hide_index=True)
+        st.caption(
+            "Métricas con el umbral 0.5. Las columnas con τ aplican el umbral de riesgo cero "
+            f"τ* = {TAU:.2f}, calibrado para el modelo desplegado ({META['model_name']}); en los demás "
+            "modelos es solo referencia. «Umbral más alto con FN = 0 (peor fold)» es el umbral más alto "
+            "que habría dado FN = 0 en todos los folds: el borde superior de la franja segura."
+        )
+
+        # ---------------------------------------------------- dictamen sobre el modelo desplegado
+        desplegado = META["model_name"]
+        if desplegado in modelos_cv:
+            res_desp = resultados_cv[resultados_cv["Model"] == desplegado]
+            fn_tau = int(res_desp["FN (τ*)"].sum())
+            folds_con_fn = int((res_desp["FN (τ*)"] > 0).sum())
+            tau_robusto = float(res_desp["τ* del fold"].min())
+            if fn_tau == 0:
+                st.success(
+                    f"✅ **Riesgo cero estable:** con τ* = {TAU:.2f}, el {desplegado} no dejó pasar ningún "
+                    f"hongo venenoso en ninguno de los {k_cv} folds."
+                )
+            else:
+                st.warning(
+                    f"⚠️ Con τ* = {TAU:.2f}, el {desplegado} clasificó como comestibles **{fn_tau}** "
+                    f"hongo(s) venenoso(s) en **{folds_con_fn} de {k_cv}** folds. El τ* desplegado se calibró "
+                    f"con {ORIGEN_TAU}; con esta configuración, el umbral más alto con FN = 0 en todos los "
+                    f"folds es **{tau_robusto:.2f}**. Para recalibrarlo, ejecuta `python recalibrar_umbral_cv.py`."
+                )
+            st.pyplot(fig_tau_por_fold(res_desp, TAU, desplegado))
+            st.caption(
+                "Cada barra es el umbral más alto que no deja pasar venenosos en ese fold. Verde: τ* desplegado "
+                "queda por debajo, así que no produce falsos negativos. Rojo: sí los produce."
+            )
+
+        st.markdown("#### Variabilidad entre folds")
+        st.pyplot(fig_metricas_cv(resultados_cv))
+
+        st.markdown("#### ¿El resultado del test fue suerte?")
+        st.caption(
+            "Compara la métrica del único split de test (notebook 03) con la media ± desviación de la "
+            "validación cruzada. Si el test cae dentro de la banda, el resultado reportado es representativo."
+        )
+        st.dataframe(tabla_cv_vs_test(resumen_cv, META["test_metrics"]), width="stretch", hide_index=True)
+
+        with st.expander("Ver resultados fold por fold"):
+            st.dataframe(
+                resultados_cv.style.format(
+                    {**{m: "{:.4f}" for m in METRICAS_CV}, "% venenosos (validación)": "{:.2%}",
+                     "τ* del fold": "{:.2f}", "Tiempo (s)": "{:.2f}"}
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "⬇️ Descargar resultados por fold (CSV)",
+                resultados_cv.to_csv(index=False).encode("utf-8"),
+                file_name=f"validacion_cruzada_{k_cv}fold.csv",
+                mime="text/csv",
+            )
+
+        # ---------------------------------------------------- controles de fuga de datos
+        st.markdown("#### Controles de fuga de datos (data leakage)")
+        prop = resultados_cv["% venenosos (validación)"]
+        repetidas = controles["test_repetidas_en_desarrollo"]
+        st.markdown(
+            f"""
+| Control | Resultado |
+|---|---|
+| El test no participa en la validación cruzada | ✅ {controles['n_desarrollo']:,} filas de desarrollo y {controles['n_test']:,} de test; índices compartidos: **{controles['indices_compartidos']}** |
+| Preprocesamiento ajustado dentro de cada fold | ✅ Se crea un `Pipeline` nuevo por fold: el imputador, el escalador y el One-Hot solo ven las filas de entrenamiento del fold |
+| Folds estratificados | ✅ % de venenosos en validación entre **{prop.min():.2%}** y **{prop.max():.2%}** |
+| Filas del test idénticas a filas de desarrollo | {'✅ ninguna' if repetidas == 0 else f'⚠️ **{repetidas}** ({repetidas / controles["n_test"]:.2%} del test) — el dataset tiene {controles["duplicados_dataset"]} registros duplicados'} |
+"""
+        )
+        st.code(
+            "for idx_ent, idx_val in StratifiedKFold(n_splits=k, shuffle=True, random_state=42).split(X_dev, y_dev):\n"
+            "    pipeline = create_model_pipeline(clone(modelo), columnas_numericas, columnas_categoricas)\n"
+            "    pipeline.fit(X_dev.iloc[idx_ent], y_dev.iloc[idx_ent])      # se ajusta solo con el fold de entrenamiento\n"
+            "    proba = pipeline.predict_proba(X_dev.iloc[idx_val])[:, 1]   # se evalúa con datos que no vio",
+            language="python",
+        )
+        st.info(
+            "**Limitación del dataset:** el *Secondary Mushroom Dataset* fue simulado a partir de 173 especies, "
+            "así que hay muchos especímenes muy parecidos entre sí. La validación cruzada aleatoria mide qué tan "
+            "bien el modelo reconoce especies que ya vio, no especies nuevas; por eso las métricas cercanas al "
+            "100 % no implican lo mismo en hongos de especies fuera del dataset."
+        )
 
 # ================================================================== 4. EXPLICABILIDAD
 elif PAGINA == "🔍 Explicabilidad (XAI)":
@@ -727,6 +1013,41 @@ elif PAGINA == "📖 Ficha técnica y fórmulas":
     m3.metric("Umbral τ*", f"{TAU:.2f}")
     st.caption(f"Criterio de selección: {META['selection_criteria']}")
 
+    if CALIBRACION:
+        st.markdown("**Calibración del umbral de riesgo cero τ\\***")
+        detalle_franja = ""
+        if "margin_to_edible" in CALIBRACION:
+            franja_cv = CALIBRACION["cv_out_of_fold_band"]
+            detalle_franja = (
+                f" Franja: {franja_cv['max_proba_edible']:.2f} – {franja_cv['min_proba_poisonous']:.2f}; margen de "
+                f"{CALIBRACION['margin_to_edible']:.2f} hacia los comestibles y de "
+                f"{CALIBRACION['margin_to_poisonous']:.2f} hacia los venenosos."
+            )
+        st.markdown(f"{CALIBRACION['method']}{detalle_franja}")
+        st.markdown(
+            f"Antes se usaba τ = {CALIBRACION['single_split_threshold']:.2f}: el umbral más alto con FN = 0 en un "
+            "único split de validación. Dependía del split (falla en un fold) y quedaba en el borde de la franja "
+            "segura, sin margen."
+        )
+        prueba = CALIBRACION["test_at_threshold"]
+        columnas_fold = {
+            "Fold": range(1, len(CALIBRACION["fold_thresholds"]) + 1),
+            "Umbral más alto con FN = 0": CALIBRACION["fold_thresholds"],
+        }
+        if "fold_fn_at_threshold" in CALIBRACION:
+            columnas_fold[f"FN con τ* = {TAU:.2f}"] = CALIBRACION["fold_fn_at_threshold"]
+            columnas_fold[f"FP con τ* = {TAU:.2f}"] = CALIBRACION["fold_fp_at_threshold"]
+        columnas_fold[f"FN con τ = {CALIBRACION['single_split_threshold']:.2f}"] = (
+            CALIBRACION["fold_fn_at_single_split_threshold"]
+        )
+        st.dataframe(pd.DataFrame(columnas_fold), width="stretch", hide_index=True)
+        st.caption(
+            f"Verificación en test con τ* = {TAU:.2f}: FN = {prueba['fn']}, FP = {prueba['fp']}, "
+            f"precisión = {prueba['precision']:.2%}, recall = {prueba['recall']:.2%}. En test, el venenoso "
+            f"con menor probabilidad tuvo P = {CALIBRACION['test_min_proba_poisonous']:.2f} y el comestible "
+            f"con mayor probabilidad, P = {CALIBRACION['test_max_proba_edible']:.2f}."
+        )
+
     with st.expander("Metadatos completos (model_metadata.json)"):
         st.json(META)
 
@@ -749,6 +1070,7 @@ elif PAGINA == "📖 Ficha técnica y fórmulas":
                     "Exploración del dataset con visualizaciones (INFOVIZ).",
                     "Descarga de resultados por lotes y plantilla CSV de ejemplo.",
                     "Ficha técnica y documentación matemática embebida.",
+                    "Validación cruzada estratificada k-fold sin fuga de datos (pipeline por fold, test excluido).",
                 ],
                 start=1,
             )
